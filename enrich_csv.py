@@ -21,29 +21,41 @@ def slugify(name):
     return slug
 
 def fetch_details(slug):
-    url = f"{BASE_URL}{slug}/"
+    url = f"https://www.raise.sg/directory/{slug}/"
     try:
         resp = session.get(url, timeout=10)
         resp.raise_for_status()
-    except Exception:
-        return None  # trigger fallback
+    except Exception as e:
+        print(f"Failed: {slug} ({e})")
+        return None
+
     soup = BeautifulSoup(resp.text, "html.parser")
     result = {"address": None, "email": None, "phone": None}
 
-    # Address
-    addr_heading = soup.find('h4', string="Address")
-    if addr_heading and addr_heading.find_next_sibling("p"):
-        result["address"] = addr_heading.find_next_sibling("p").get_text(strip=True)
+    # --- Address ---
+    address_heading = soup.find('p', string=re.compile(r'^\s*Address\s*$', re.IGNORECASE))
+    if address_heading:
+        address_container = address_heading.find_next('div')
+        if address_container:
+            address_text = address_container.get_text(separator=" ", strip=True)
+            result["address"] = address_text if address_text else None
 
-    # Contact info
-    contact_heading = soup.find(string="Contact")
-    if contact_heading:
-        parent = contact_heading.find_parent()
-        text = parent.get_text(separator=" ", strip=True)
-        emails = EMAIL_REGEX.findall(text)
-        phones = PHONE_REGEX.findall(text)
-        result["email"] = emails[0] if emails else None
-        result["phone"] = phones[0] if phones else None
+    # --- Email ---
+    email_tag = soup.find('a', href=re.compile(r'^mailto:', re.IGNORECASE))
+    if email_tag:
+        result["email"] = email_tag.get_text(strip=True)
+
+    # --- Phone ---
+    phone_tag = soup.find('a', href=re.compile(r'^tel:', re.IGNORECASE))
+    if phone_tag:
+        result["phone"] = phone_tag.get_text(strip=True)
+    else:
+        # fallback via regex search inside contact section
+        contact_popup = soup.select_one('.js-bfg-brand-contact-info-popup')
+        if contact_popup:
+            phones = PHONE_REGEX.findall(contact_popup.get_text())
+            if phones:
+                result["phone"] = phones[0]
 
     return result
 
